@@ -18,7 +18,7 @@ A local Docker proof of concept for **frontend product analytics** using only op
 
 ## What you get
 
-### Insights app: http://localhost:8080/insights/
+### Insights app: http://localhost:3001 (next to Grafana, also embedded in Grafana as the "Product Insights" dashboard)
 
 | Page | What it does |
 |---|---|
@@ -44,7 +44,7 @@ A local Docker proof of concept for **frontend product analytics** using only op
 
 ## Run it
 
-**Requirements:** Docker Desktop (or Docker Engine + Compose v2), about 2 GB of free RAM, and free ports **3000, 8080, 12347**. Python 3 is optional, only for `./poc.sh test`.
+**Requirements:** Docker Desktop (or Docker Engine + Compose v2), about 2 GB of free RAM, and free ports **3000, 3001, 8080, 12347**. Python 3 is optional, only for `./poc.sh test`.
 
 ```bash
 unzip faro-analytics-poc.zip && cd faro-analytics-poc
@@ -53,7 +53,7 @@ unzip faro-analytics-poc.zip && cd faro-analytics-poc
 On Windows, run it from WSL2. Without bash, `docker compose up -d` does the same thing.
 
 Then:
-1. Open **http://localhost:8080/insights/** for replays, funnels, retention, paths and heatmaps, or **http://localhost:3000** for the Grafana dashboard.
+1. Open **http://localhost:3001** (or Grafana → Dashboards → **Product Insights**) for replays, funnels, retention, paths and heatmaps, or **http://localhost:3000** for the Grafana dashboard.
 1. In Grafana: open **http://localhost:3000**. The dashboard opens directly, with no login. Data appears within about 30 seconds.
 2. Open **http://localhost:8080**, browse products, add to cart, check out, sign up on *Pricing*, and press *Trigger JS error*.
 3. Back in Grafana, your clicks show up within about 30 seconds. Use the **Live event stream** panel or Explore (`{source="faro"} | logfmt | browser_name="Chrome"`).
@@ -96,8 +96,8 @@ The dashboard was checked against a real **Loki 3.7.10 + Alloy 1.21.3** pipeline
 
 ## How the new features work
 
-- **Session replay:** the demo shop adds `ReplayInstrumentation` to Faro. rrweb events travel as normal Faro events (`faro.session_recording.event`) through Alloy into Loki, and the Insights page reads them back through a **read-only** nginx proxy (`/loki/api/v1/query*`, GET only). Grafana Cloud's paid viewer isn't needed. Only real browsers produce recordings. Synthetic sessions show their journey timeline only.
-- **Heatmaps:** every click is pushed as a `ui_click` event with the element's CSS path and the position inside it. The heatmap page loads the page in an iframe (`?embed=1`, which disables tracking) and paints the clicks over the matching elements.
+- **Session replay:** the demo shop adds `ReplayInstrumentation` to Faro. rrweb events travel as normal Faro events (`faro.session_recording.event`) through Alloy into Loki, and the Insights app (port 3001) reads them back through its **read-only** nginx proxy (`/loki/api/v1/query*`, GET only). Grafana Cloud's paid viewer isn't needed. Only real browsers produce recordings. Synthetic sessions show their journey timeline only.
+- **Heatmaps:** every click is pushed as a `ui_click` event with the element's CSS path and the position inside it. The heatmap page loads a copy of the shop served by the Insights server itself (`/shop/?embed=1`). It has to be the same address so the page's elements can be read, and `embed=1` turns tracking off and paints the clicks over the matching elements.
 - **Funnels, retention and paths** are computed in the browser from compact event rows queried from Loki. That's fine up to roughly 200k events per view. Beyond that, move the calculations to ClickHouse.
 - **Backfill:** Faro events are stamped on arrival, so for retention the generator writes 13 days of history directly to Loki, in the exact format Alloy produces. It uses its own `origin="backfill"` stream so it never clashes with live data, then calls Loki's `/flush` so the history is queryable at once. It only runs when no history exists yet.
 
@@ -107,7 +107,7 @@ The dashboard was checked against a real **Loki 3.7.10 + Alloy 1.21.3** pipeline
 - **Replay privacy:** inputs are always masked. The POC shows page text (`maskTextSelector: '[data-private]'`). For production, keep Faro's default (mask all text), add a consent banner, and lower `replay.samplingRate` in `demo-app/config.js`.
 - **Loki stamps Faro events when they arrive,** so history can only be back-filled by writing to Loki directly, as the generator does.
 - **High-cardinality fields** (`session_id`, `user_id`) stay in the log line, not in labels. That's correct for Loki, but long time ranges over millions of events are slow. Use recording rules or ClickHouse for heavy reporting.
-- **Security:** Grafana runs with anonymous admin and the collector accepts any origin. For a real deployment, turn on Grafana auth, restrict `cors_allowed_origins`, put the collector behind TLS, and set Loki retention to your policy.
+- **Security:** Grafana allows raw HTML in panels (`GF_PANELS_DISABLE_SANITIZE_HTML`) so it can embed Insights, and it runs with anonymous admin and the collector accepts any origin. For a real deployment, turn on Grafana auth, restrict `cors_allowed_origins`, put the collector behind TLS, and set Loki retention to your policy.
 
 ## Layout
 
@@ -119,7 +119,8 @@ grafana/provisioning/              Loki data source + dashboard provider
 grafana/dashboards/                product-analytics.json (generated by tools/build_dashboard.py)
 demo-app/                          instrumented demo shop + vendored Faro SDK & replay add-on 2.14.0
 insights/                          Insights app: replay, funnels, retention, paths, heatmaps (+ vendored rrweb-player)
-nginx/default.conf                 serves shop + Insights, read-only Loki query proxy
+nginx/default.conf                 demo shop (port 8080)
+nginx/insights.conf                Insights app (port 3001): pages, /shop/ preview copy, read-only Loki proxy
 tools/test_insights.mjs            runs the Insights analysis against Loki (node tools/test_insights.mjs http://localhost:3100)
 loadgen/loadgen.py                 synthetic visitors (stdlib Python, Faro payload format)
 tools/build_dashboard.py           dashboard source of truth (edit here, then re-run)

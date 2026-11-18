@@ -1958,35 +1958,35 @@
     {
       "title": "Session replay",
       "type": "link",
-      "url": "http://localhost:8080/insights/replay.html",
+      "url": "http://localhost:3001/replay.html",
       "targetBlank": true,
       "icon": "external link"
     },
     {
       "title": "Funnels & drop-off",
       "type": "link",
-      "url": "http://localhost:8080/insights/funnel.html",
+      "url": "http://localhost:3001/funnel.html",
       "targetBlank": true,
       "icon": "external link"
     },
     {
       "title": "Retention",
       "type": "link",
-      "url": "http://localhost:8080/insights/retention.html",
+      "url": "http://localhost:3001/retention.html",
       "targetBlank": true,
       "icon": "external link"
     },
     {
       "title": "User paths",
       "type": "link",
-      "url": "http://localhost:8080/insights/paths.html",
+      "url": "http://localhost:3001/paths.html",
       "targetBlank": true,
       "icon": "external link"
     },
     {
       "title": "Heatmaps",
       "type": "link",
-      "url": "http://localhost:8080/insights/heatmap.html",
+      "url": "http://localhost:3001/heatmap.html",
       "targetBlank": true,
       "icon": "external link"
     }

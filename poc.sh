@@ -30,10 +30,12 @@ case "${1:-}" in
     wait_http "Loki" "http://127.0.0.1:3100/ready" 180
     wait_http "Grafana" "http://localhost:3000/api/health" 180
     wait_http "Demo shop" "http://localhost:8080/" 60
+    wait_http "Insights" "http://localhost:3001/" 60
     log "Seeding traffic (about 300 sessions, then ~20/min live). Dashboard fills in ~30 s"
     cat <<'EOF'
 
-  Dashboard   http://localhost:3000            (Product Analytics · Grafana Faro)
+  Grafana     http://localhost:3000            (dashboards: "Product Analytics" + "Product Insights")
+  Insights    http://localhost:3001            (replay, funnels, retention, paths, heatmaps)
   Demo shop   http://localhost:8080            (click around, your visits show up too)
   Explore     http://localhost:3000/explore    (ad-hoc LogQL, see docs/QUERIES.md)
   Alloy UI    http://localhost:12345           (pipeline graph)

@@ -179,10 +179,25 @@ dashboard = {
     ]},
     "annotations": {"list": []}, "panels": panels,
     "links": [{"title": t, "type": "link", "url": u, "targetBlank": True, "icon": "external link"} for t, u in [
-        ("Session replay", "http://localhost:8080/insights/replay.html"), ("Funnels & drop-off", "http://localhost:8080/insights/funnel.html"),
-        ("Retention", "http://localhost:8080/insights/retention.html"), ("User paths", "http://localhost:8080/insights/paths.html"),
-        ("Heatmaps", "http://localhost:8080/insights/heatmap.html")]],
+        ("Session replay", "http://localhost:3001/replay.html"), ("Funnels & drop-off", "http://localhost:3001/funnel.html"),
+        ("Retention", "http://localhost:3001/retention.html"), ("User paths", "http://localhost:3001/paths.html"),
+        ("Heatmaps", "http://localhost:3001/heatmap.html")]],
 }
 out = pathlib.Path(__file__).resolve().parent.parent / "grafana/dashboards/product-analytics.json"
 out.write_text(json.dumps(dashboard, indent=2) + "\n")
 print(f"wrote {out} ({len([p for p in panels if p['type'] != 'row'])} panels)")
+
+# ------------------------------------------------- Insights embedded in Grafana
+insights = {
+    "uid": "faro-product-insights", "title": "Product Insights · replay, funnels, retention, paths, heatmaps",
+    "tags": ["faro", "product-analytics", "poc"], "editable": True, "schemaVersion": 39, "version": 1,
+    "time": {"from": "now-24h", "to": "now"}, "templating": {"list": []}, "annotations": {"list": []},
+    "links": [{"title": "Product Analytics dashboard", "type": "link", "url": "/d/faro-product-analytics", "icon": "dashboard"},
+              {"title": "Open Insights full screen", "type": "link", "url": "http://localhost:3001", "targetBlank": True, "icon": "external link"}],
+    "panels": [{"id": 1, "type": "text", "title": "", "transparent": True, "gridPos": {"x": 0, "y": 0, "w": 24, "h": 40},
+                "options": {"mode": "html", "content":
+                    '<iframe src="http://localhost:3001/" style="width:100%;height:100%;min-height:1100px;border:0" title="Product Insights"></iframe>'}}],
+}
+out2 = out.with_name("product-insights.json")
+out2.write_text(json.dumps(insights, indent=2) + "\n")
+print(f"wrote {out2}")

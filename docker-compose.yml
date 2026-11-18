@@ -49,6 +49,9 @@ services:
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/product-analytics.json
       GF_ANALYTICS_REPORTING_ENABLED: 'false'
       GF_NEWS_NEWS_FEED_ENABLED: 'false'
+      # Lets the "Product Insights" dashboard embed the Insights app (iframe in a
+      # Text panel). POC only: it allows raw HTML in panels.
+      GF_PANELS_DISABLE_SANITIZE_HTML: 'true'
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -60,15 +63,25 @@ services:
     restart: unless-stopped
 
   demo-app:
-    # Demo shop (/) + Insights app (/insights/: replays, funnels, retention,
-    # paths, heatmaps) + read-only Loki query proxy (/loki/api/v1/query*).
+    # The demo shop (instrumented with Faro), the "website".
     image: nginx:1.27-alpine
     volumes:
       - ./demo-app:/usr/share/nginx/html:ro
-      - ./insights:/usr/share/insights:ro
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - '8080:80'
+    restart: unless-stopped
+
+  insights:
+    # Insights app next to Grafana: replays, funnels/drop-off, retention,
+    # user paths, heatmaps. Also embedded in Grafana ("Product Insights").
+    image: nginx:1.27-alpine
+    volumes:
+      - ./insights:/usr/share/insights:ro
+      - ./demo-app:/usr/share/shop:ro
+      - ./nginx/insights.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - '3001:80'
     depends_on:
       - loki
     restart: unless-stopped

@@ -78,7 +78,7 @@ function draw() {
   frame.onload = () => setTimeout(() => paint(frame, sel, width, scale), 400);
   // A fresh query string forces a full reload. Changing only the #hash would
   // not fire 'load', and the heatmap would never be painted.
-  frame.src = `/?embed=1&v=${Date.now()}#${path}`;
+  frame.src = `/shop/?embed=1&v=${Date.now()}#${path}`;
 
   if (!sel.length) {
     const c = document.getElementById('heat'); c.getContext('2d').clearRect(0, 0, c.width, c.height);

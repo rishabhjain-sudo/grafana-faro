@@ -327,7 +327,7 @@
       h('nav', null, NAV.map(([href, label]) => h('a', { href, class: href === current ? 'on' : '' }, label))),
       h('div', { class: 'controls' }, extra || null, sel,
         h('a', { class: 'ext', href: 'http://localhost:3000', target: '_blank' }, 'Grafana ↗'),
-        h('a', { class: 'ext', href: '/', target: '_blank' }, 'Demo shop ↗')));
+        h('a', { class: 'ext', href: 'http://localhost:8080', target: '_blank' }, 'Demo shop ↗')));
     document.body.prepend(bar);
     return () => +sel.value;
   }
