@@ -21,6 +21,8 @@
     <label>Page <select id="page"></select></label>
     <label>Device <select id="device"><option value="desktop">Desktop (1280px)</option><option value="mobile">Mobile (390px)</option></select></label>
     <label>Opacity <input type="range" id="opacity" min="0.2" max="1" step="0.05" value="0.75"></label>
+    <button id="refresh" class="primary">↻ Refresh</button>
+    <label class="small"><input type="checkbox" id="auto" checked> auto-refresh 30s</label>
     <span style="flex:1"></span>
     <span class="small muted">fewer</span><div class="legend-scale" style="width:120px"></div><span class="small muted">more clicks</span>
   </div>
@@ -74,8 +76,14 @@ function draw() {
   wrap.style.transform = `scale(${scale})`;
   frame.style.width = width + 'px'; frame.style.height = '900px';
   frame.onload = () => setTimeout(() => paint(frame, sel, width, scale), 400);
-  frame.src = `/?embed=1#${path}`;
+  // A fresh query string forces a full reload. Changing only the #hash would
+  // not fire 'load', and the heatmap would never be painted.
+  frame.src = `/?embed=1&v=${Date.now()}#${path}`;
 
+  if (!sel.length) {
+    const c = document.getElementById('heat'); c.getContext('2d').clearRect(0, 0, c.width, c.height);
+    I.status(clicks.length ? `No ${device} clicks on this page in the selected time range. Try another page, device or range.` : 'No clicks yet. Click around the demo shop, then press Refresh.');
+  } else I.status('');
   const summary = I.clickSummary(sel);
   const sessions = new Set(sel.map((c) => c.session_id)).size;
   const kp = document.getElementById('kpis'); kp.innerHTML = '';
@@ -139,6 +147,8 @@ function palette() {
   return x.getImageData(0, 0, 256, 1).data;
 }
 const getRange = I.header('heatmap.html', '24h', load);
+document.getElementById('refresh').onclick = () => load(getRange());
+setInterval(() => { if (document.getElementById('auto').checked) load(getRange()); }, 30000);
 load(getRange());
 </script>
 </body></html>
