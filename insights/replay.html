@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insights · Session replay</title>
+<link rel="stylesheet" href="insights.css">
+<!-- rrweb-player 2.2.2 (MIT), vendored -->
+<link rel="stylesheet" href="vendor/rrweb-player-2.2.2.css">
+<script src="vendor/rrweb-player-2.2.2.min.js"></script>
+<script src="common.js"></script>
+<style>
+  .layout { display: grid; grid-template-columns: 430px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+  #sessions { max-height: 75vh; overflow: auto; }
+  #player { min-height: 200px; display: flex; justify-content: center; }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .filters button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+</style>
+</head><body>
+<main>
+  <h1>Session replay</h1>
+  <p class="sub">Recorded with <code>@grafana/faro-instrumentation-replay</code> (rrweb). Stored as Faro events in your own Loki and played back with rrweb-player. Inputs and private text are masked in the browser before sending. Synthetic traffic has journeys only. Browse the demo shop to create real recordings.</p>
+  <div class="layout">
+    <div class="card">
+      <div class="filters" id="filters"></div>
+      <input type="text" id="search" placeholder="Filter by user or session id" style="width:100%;margin-bottom:8px">
+      <div id="sessions"></div>
+    </div>
+    <div>
+      <div class="card" style="margin-bottom:16px"><h2 id="title">Pick a session</h2><div id="meta" class="muted small"></div><div id="player"></div></div>
+      <div class="card"><h2>Journey timeline</h2><div id="timeline" class="timeline muted">–</div></div>
+    </div>
+  </div>
+</main>
+<script>
+const I = Insights, h = I.h;
+const FILTERS = [['recorded', '▶ Recorded'], ['abandoned', 'Abandoned cart'], ['purchased', 'Purchased'], ['errors', 'Had errors'], ['all', 'All sessions']];
+let filter = 'recorded', all = [], player = null;
+const wanted = new URLSearchParams(location.search).get('session');
+if (wanted) filter = 'all';
+
+function renderFilters() {
+  const box = document.getElementById('filters'); box.innerHTML = '';
+  FILTERS.forEach(([k, l]) => box.append(h('button', { class: k === filter ? 'on' : '', onclick: () => { filter = k; renderFilters(); renderList(); } }, l)));
+}
+document.getElementById('search').oninput = renderList;
+
+function renderList() {
+  const q = document.getElementById('search').value.trim();
+  const rows = all.filter((s) => (filter === 'all' || (filter === 'recorded' && s.recorded) || (filter === 'abandoned' && s.abandoned) ||
+    (filter === 'purchased' && s.purchased) || (filter === 'errors' && s.errors > 0)) && (!q || s.id.includes(q) || s.user.includes(q)));
+  const t = h('table', null, h('tr', null, h('th', null, 'Started'), h('th', null, 'User · outcome'), h('th', { class: 'n' }, 'Pages')));
+  rows.slice(0, 300).forEach((s) => t.append(h('tr', { class: 'click' + (s.id === wanted ? ' sel' : ''), 'data-id': s.id, onclick: () => open(s) },
+    h('td', null, I.when(s.start), h('div', { class: 'small muted' }, I.dur(s.end - s.start))),
+    h('td', null, h('code', null, s.user), h('div', null,
+      s.recorded ? h('span', { class: 'badge rec' }, '▶ replay') : '',
+      s.purchased ? h('span', { class: 'badge good' }, 'purchased') : s.abandoned ? h('span', { class: 'badge warn' }, 'abandoned cart') : '',
+      s.errors ? h('span', { class: 'badge bad' }, `${s.errors} error${s.errors > 1 ? 's' : ''}`) : '',
+      h('span', { class: 'badge' }, s.mobile ? 'mobile' : 'desktop'))),
+    h('td', { class: 'n' }, s.pages))));
+  const box = document.getElementById('sessions'); box.innerHTML = '';
+  box.append(rows.length ? t : h('p', { class: 'muted' }, filter === 'recorded' ? 'No recordings yet in this range. Open the demo shop (http://localhost:8080), click around for 20 seconds, then refresh.' : 'No sessions match.'));
+  if (rows.length > 300) box.append(h('p', { class: 'muted small' }, `Showing 300 of ${rows.length}.`));
+}
+
+async function open(s) {
+  document.querySelectorAll('tr.sel').forEach((r) => r.classList.remove('sel'));
+  const tr = document.querySelector(`tr[data-id="${CSS.escape(s.id)}"]`); if (tr) tr.classList.add('sel');
+  history.replaceState(null, '', `?session=${encodeURIComponent(s.id)}${location.search.includes('range=') ? '&range=' + new URLSearchParams(location.search).get('range') : ''}`);
+  document.getElementById('title').textContent = `Session ${s.id}`;
+  document.getElementById('meta').textContent = `${s.user} · ${s.mobile ? 'mobile' : 'desktop'} · ${s.browser} · campaign ${s.campaign} · ${I.when(s.start)} · ${I.dur(s.end - s.start)}`;
+  const pbox = document.getElementById('player'); pbox.innerHTML = '';
+  if (player && player.$destroy) { try { player.$destroy(); } catch (_) { /* ignore */ } }
+  player = null;
+
+  // Timeline: every product event + errors for this session
+  const from = s.start - 3600e3, to = s.end + 3600e3;
+  const [evs, errs] = await Promise.all([
+    I.logs(`${I.EV()} | logfmt | session_id="${s.id}" | event_name!~"faro\\\\.session_recording\\\\.event" ${I.fmtLine(['event_name', 'event_data_path', 'event_data_product', 'event_data_label', 'event_data_revenue', 'event_data_plan', 'event_data_feature'])}`, from, to),
+    I.logs(`{source="faro", app_name="${I.CFG.app}", kind="exception"} | logfmt | session_id="${s.id}" ${I.fmtLine(['type', 'value'])}`, from, to),
+  ]);
+  const items = [...I.tsv(evs.rows, ['event_name', 'path', 'product', 'label', 'revenue', 'plan', 'feature']).map((e) => ({ ...e, kind: 'ev' })),
+    ...I.tsv(errs.rows, ['type', 'value']).map((e) => ({ ...e, kind: 'err' }))].sort((a, b) => a.ts - b.ts);
+  const tl = document.getElementById('timeline'); tl.innerHTML = ''; tl.classList.remove('muted');
+  items.forEach((e) => {
+    const rel = '+' + I.dur(e.ts - items[0].ts);
+    let text;
+    if (e.kind === 'err') text = `⚠ ${e.type}: ${e.value}`;
+    else if (e.event_name === 'page_view') text = `📄 ${e.path}`;
+    else if (e.event_name === 'ui_click') text = `🖱 clicked “${e.label}”`;
+    else if (e.event_name === 'purchase') text = `💰 purchase $${e.revenue}`;
+    else if (e.event_name === 'add_to_cart') text = `🛒 add to cart: ${e.product}`;
+    else if (e.event_name === 'product_viewed') text = `👀 viewed ${e.product}`;
+    else if (e.event_name === 'signup') text = `✍ signed up (${e.plan})`;
+    else if (e.event_name === 'feature_used') text = `✨ used ${e.feature}`;
+    else text = e.event_name;
+    tl.append(h('div', { class: 'ev' + (e.event_name === 'purchase' ? ' purchase' : '') + (e.kind === 'err' ? ' error' : '') }, h('span', { class: 't' }, rel), h('span', null, text)));
+  });
+  if (!items.length) tl.textContent = 'No events.';
+  const pv = items.filter((e) => e.event_name === 'page_view');
+  if (!s.purchased && pv.length) tl.append(h('div', { class: 'ev error' }, h('span', { class: 't' }, 'exit'), h('span', null, `🚪 left on ${pv[pv.length - 1].path}`)));
+
+  if (!s.recorded) { pbox.append(h('p', { class: 'muted' }, 'No recording for this session (synthetic traffic, or recording was sampled out). The timeline below shows the journey.')); return; }
+  pbox.append(h('p', { class: 'muted' }, 'Loading recording…'));
+  const rec = await I.logs(`${I.EV()} | logfmt | session_id="${s.id}" | event_name="faro.session_recording.event" ${I.fmtLine(['event_data_recording_id', 'event_data_gen', 'event_data_seq', 'event_data_event'])}`, from, to, { page: 5000 });
+  const events = [];
+  for (const r of rec.rows) {
+    // Split on the first 3 tabs only: the rrweb JSON itself may contain tabs.
+    const a = r.line.indexOf('\t'), b = r.line.indexOf('\t', a + 1), c = r.line.indexOf('\t', b + 1);
+    const rid = r.line.slice(0, a), gen = r.line.slice(a + 1, b), seq = r.line.slice(b + 1, c), json = r.line.slice(c + 1);
+    try { events.push({ gen: +gen, seq: +seq, rid, e: JSON.parse(json) }); } catch (_) { /* skip malformed */ }
+  }
+  // Play the most recent recording in this session; order by generation, then sequence
+  const rid = events.length ? events[events.length - 1].rid : null;
+  const ordered = events.filter((x) => x.rid === rid).sort((a, b) => a.gen - b.gen || a.seq - b.seq).map((x) => x.e);
+  pbox.innerHTML = '';
+  if (ordered.length < 2 || !ordered.some((e) => e.type === 2)) { pbox.append(h('p', { class: 'muted' }, `Recording incomplete (${ordered.length} events, no full snapshot yet). Try again in a few seconds.`)); return; }
+  const Player = window.rrwebPlayer.default || window.rrwebPlayer;
+  const width = Math.min(900, pbox.clientWidth || 900);
+  player = new Player({ target: pbox, props: { events: ordered, width, height: Math.round(width * 0.6), autoPlay: true, showController: true, skipInactive: true } });
+  document.getElementById('meta').textContent += ` · ${ordered.length} recording events`;
+}
+
+async function load(rangeMs) {
+  const end = Date.now(), start = end - rangeMs, R = Math.round(rangeMs / 1000) + 's';
+  I.status('Loading sessions…');
+  try {
+    const [{ events }, recs, errs] = await Promise.all([
+      I.fetchEvents(start, end, ['page_view', 'add_to_cart', 'purchase']),
+      I.instant(`sum by (session_id) (count_over_time(${I.EV()} | logfmt | event_name="faro.session_recording.event" [${R}]))`),
+      I.instant(`sum by (session_id) (count_over_time({source="faro", app_name="${I.CFG.app}", kind="exception"} | logfmt [${R}]))`),
+    ]);
+    const recorded = new Set(recs.map((r) => r.metric.session_id));
+    const errCount = new Map(errs.map((r) => [r.metric.session_id, r.value]));
+    all = [...I.bySession(events).values()].map((s) => {
+      const has = (n) => s.events.some((e) => e.event_name === n);
+      return { id: s.id, user: s.user, mobile: s.mobile, campaign: s.campaign, browser: s.browser, start: s.events[0].ts, end: s.events[s.events.length - 1].ts,
+        pages: s.events.filter((e) => e.event_name === 'page_view').length, recorded: recorded.has(s.id), purchased: has('purchase'),
+        abandoned: has('add_to_cart') && !has('purchase'), errors: errCount.get(s.id) || 0 };
+    }).sort((a, b) => b.start - a.start);
+    I.status('');
+    renderFilters(); renderList();
+    const w = wanted && all.find((s) => s.id === wanted);
+    if (w) open(w);
+  } catch (e) { I.status(e.message, 'err'); }
+}
+const getRange = I.header('replay.html', '24h', load);
+load(getRange());
+</script>
+</body></html>

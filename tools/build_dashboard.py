@@ -42,7 +42,7 @@ panel("Avg order value", "stat", 4, 4, [(f'{REVENUE} / {PURCHASES}', "", True)],
 
 row("Engagement")
 panel("Events per interval", "timeseries", 16, 8,
-      [(f'sum by (event_name) (count_over_time({EV} | logfmt [$__auto]))', "{{event_name}}", False)])
+      [(f'sum by (event_name) (count_over_time({EV} | logfmt | event_name!~"faro.session_recording.event|ui_click" [$__auto]))', "{{event_name}}", False)])
 panel("Active users per interval", "timeseries", 8, 8,
       [(f'count(sum by (user_id) (count_over_time({EV} | logfmt [$__auto])))', "active users", False)])
 
@@ -59,6 +59,16 @@ panel("Revenue by campaign", "bargauge", 12, 9,
       [(f'sort_desc(sum by (session_attr_campaign) (sum_over_time({EV} | logfmt '
         f'| event_name="purchase" {CAMPAIGN}| unwrap event_data_revenue | __error__="" [$__range])))', "{{session_attr_campaign}}", True)],
       unit="currencyUSD", orientation="horizontal")
+
+panel("Abandoned carts (sessions)", "stat", 6, 5,
+      [(f'count(sum by (session_id) (count_over_time({EV} | logfmt | event_name="add_to_cart" [$__range])) '
+        f'unless on (session_id) sum by (session_id) (count_over_time({EV} | logfmt | event_name="purchase" [$__range])))', "", True)],
+      thresholds=[1, 50], desc="Sessions that added to cart but never purchased. Inspect them in Insights → Funnels / Session replay.")
+panel("Recorded sessions (replay)", "stat", 6, 5,
+      [(f'count(sum by (session_id) (count_over_time({EV} | logfmt | event_name="faro.session_recording.started" [$__range])))', "", True)])
+panel("Most-clicked elements (heatmap data)", "bargauge", 12, 5,
+      [(f'topk(8, sum by (event_data_label) (count_over_time({EV} | logfmt | event_name="ui_click" [$__range])))', "{{event_data_label}}", True)],
+      orientation="horizontal")
 
 row("Product & audience")
 panel("Top pages", "bargauge", 8, 9,
@@ -100,7 +110,7 @@ panel("Frustration signals (Faro)", "bargauge", 8, 8,
       desc="Rage clicks and dead clicks detected automatically by the Faro Web SDK.")
 
 row("Raw events")
-panel("Live event stream", "logs", 24, 10, [(EV, "", False)])
+panel("Live event stream", "logs", 24, 10, [(EV + ' != "faro.session_recording.event"', "", False)])
 
 # --------------------------------------------------------------------------- build
 def stat_thresholds(th):
@@ -167,7 +177,11 @@ dashboard = {
          "query": {"type": 1, "label": "app_env", "stream": '{source="faro", app_name="$app"}', "refId": "env"},
          "definition": "label_values({source=\"faro\", app_name=\"$app\"}, app_env)", "current": {"text": "poc", "value": "poc"}},
     ]},
-    "annotations": {"list": []}, "panels": panels, "links": [],
+    "annotations": {"list": []}, "panels": panels,
+    "links": [{"title": t, "type": "link", "url": u, "targetBlank": True, "icon": "external link"} for t, u in [
+        ("Session replay", "http://localhost:8080/insights/replay.html"), ("Funnels & drop-off", "http://localhost:8080/insights/funnel.html"),
+        ("Retention", "http://localhost:8080/insights/retention.html"), ("User paths", "http://localhost:8080/insights/paths.html"),
+        ("Heatmaps", "http://localhost:8080/insights/heatmap.html")]],
 }
 out = pathlib.Path(__file__).resolve().parent.parent / "grafana/dashboards/product-analytics.json"
 out.write_text(json.dumps(dashboard, indent=2) + "\n")

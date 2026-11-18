@@ -26,20 +26,33 @@
   // ---------------------------------------------------------------- Faro ---
   const { initializeFaro, getWebInstrumentations } = window.GrafanaFaroWebSdk;
   const cfg = window.FARO_CONFIG;
+  // ?embed=1 is used by the heatmap viewer to show the page without tracking it.
+  const EMBED = new URLSearchParams(location.search).has('embed');
 
   // Analytics must never break the product. If Faro can't start (blocked
   // script, old browser, ...), fall back to a no-op API.
   const noop = () => {};
   let faro = { api: { pushEvent: noop, setUser: noop, setView: noop } };
   try {
+    if (EMBED) throw new Error('embed mode: tracking disabled');
+    const instrumentations = getWebInstrumentations({ captureConsole: false });
+    // Session replay (rrweb), recorded through the same Faro pipeline.
+    const Replay = window.GrafanaFaroInstrumentationReplay;
+    if (Replay && cfg.replay && cfg.replay.enabled) {
+      instrumentations.push(new Replay.ReplayInstrumentation({
+        samplingRate: cfg.replay.samplingRate,
+        maskAllInputs: true,                  // never record what people type
+        maskTextSelector: '[data-private]',   // demo: show page text, mask only marked elements
+      }));
+    }
     faro = initializeFaro({
       url: cfg.collectorUrl,
       app: cfg.app,
-      instrumentations: getWebInstrumentations({ captureConsole: false }),
+      instrumentations,
       sessionTracking: { enabled: true, persistent: true },
     });
   } catch (err) {
-    console.warn('[demo-shop] Faro failed to initialise, analytics disabled:', err);
+    if (!EMBED) console.warn('[demo-shop] Faro failed to initialise, analytics disabled:', err);
   }
 
   // Faro event attributes must be strings.
@@ -66,6 +79,9 @@
 
   // ---------------------------------------------------------------- Cart ---
   const cart = [];
+  // Heatmap preview (?embed=1): show cart/checkout with a sample item so their
+  // buttons exist to draw clicks on.
+  if (EMBED) cart.push(PRODUCTS[0]);
   const cartValue = () => cart.reduce((s, p) => s + p.price, 0);
   function updateCartLink() {
     document.getElementById('cart-link').textContent = 'Cart (' + cart.length + ')';
@@ -144,12 +160,44 @@
     track('signup', { plan: v.plan });
   }
 
+  // ------------------------------------------------------- Click heatmap ---
+  // Each click is stored relative to the element that was clicked (CSS path +
+  // position inside it), so the heatmap lines up on any screen size.
+  let current = { page: 'home', path: '/' };
+  function cssPath(el) {
+    const parts = [];
+    while (el && el.nodeType === 1 && el !== document.body && el !== document.documentElement) {
+      if (el.id) { parts.unshift('#' + el.id); return parts.join(' > '); }
+      let i = 1;
+      for (let s = el.previousElementSibling; s; s = s.previousElementSibling) if (s.tagName === el.tagName) i++;
+      parts.unshift(el.tagName.toLowerCase() + ':nth-of-type(' + i + ')');
+      el = el.parentElement;
+    }
+    parts.unshift('body');
+    return parts.join(' > ');
+  }
+  window.demoCssPath = cssPath; // used by tools/tests to keep the traffic generator in sync
+  document.addEventListener('click', (e) => {
+    if (!(e.target instanceof Element)) return;
+    const el = e.target.closest('a, button, input, select, textarea, label, [data-track]') || e.target;
+    const r = el.getBoundingClientRect();
+    const rel = (v, start, size) => (size > 0 ? Math.min(1, Math.max(0, (v - start) / size)) : 0.5).toFixed(3);
+    track('ui_click', {
+      page: current.page, path: current.path, selector: cssPath(el),
+      label: (el.innerText || el.value || el.getAttribute('aria-label') || el.tagName).trim().replace(/\s+/g, ' ').slice(0, 40),
+      rel_x: rel(e.clientX, r.left, r.width), rel_y: rel(e.clientY, r.top, r.height),
+      x: Math.round(e.pageX), y: Math.round(e.pageY), vw: window.innerWidth,
+      device: window.innerWidth < 768 ? 'mobile' : 'desktop',
+    });
+  }, true);
+
   // ------------------------------------------------------------- Router ----
   function route() {
     const parts = (location.hash.replace(/^#\/?/, '') || 'home').split('/');
     const page = parts[0] || 'home';
+    current = { page: page, path: '/' + location.hash.replace(/^#\/?/, '') };
     faro.api.setView({ name: page });
-    track('page_view', { page: page, path: '/' + location.hash.replace(/^#\/?/, '') });
+    track('page_view', { page: page, path: current.path });
     (views[page] || views.notFound)(parts[1]);
     window.scrollTo(0, 0);
   }
@@ -169,6 +217,7 @@
     location.reload();
   };
 
+  if (EMBED) document.body.classList.add('embed');
   identify();
   window.addEventListener('hashchange', route);
   route();

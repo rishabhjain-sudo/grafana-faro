@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insights · Funnels &amp; drop-off</title>
+<link rel="stylesheet" href="insights.css">
+<script src="common.js"></script>
+</head><body>
+<main>
+  <h1>Funnels &amp; drop-off</h1>
+  <p class="sub">Strict, ordered funnel: a session counts for a step only if it completed every earlier step first, in order, within the same session.</p>
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <strong>Steps</strong>
+      <span id="steps"></span>
+      <button id="add-step">+ step</button>
+      <span style="flex:1"></span>
+      <label>Break down by <select id="segment">
+        <option value="">— none —</option><option value="device">Device</option><option value="campaign">Campaign</option><option value="browser">Browser</option>
+      </select></label>
+    </div>
+  </div>
+  <div class="grid g2">
+    <div class="card"><h2>Funnel</h2><div id="funnel"></div></div>
+    <div class="card"><h2 id="drop-title">Where people drop off</h2><p class="muted small" id="drop-sub">Click a step's drop-off below the funnel to inspect those sessions.</p><div id="exits"></div></div>
+  </div>
+  <div class="card" style="margin-top:16px" id="seg-card" hidden><h2>Breakdown</h2><div id="segments"></div></div>
+  <div class="card" style="margin-top:16px"><h2 id="stuck-title">Dropped sessions</h2><div id="stuck"></div></div>
+</main>
+<script>
+const I = Insights, h = I.h;
+const EVENTS = ['page_view', 'product_viewed', 'add_to_cart', 'checkout_started', 'purchase', 'signup', 'feature_used'];
+let steps = ['page_view', 'product_viewed', 'add_to_cart', 'checkout_started', 'purchase'];
+let sessions = null, recorded = new Set(), selectedDrop = 2;
+
+function renderStepPickers() {
+  const box = document.getElementById('steps'); box.innerHTML = '';
+  steps.forEach((s, i) => {
+    const sel = h('select', { onchange: (e) => { steps[i] = e.target.value; analyse(); } },
+      EVENTS.map((ev) => h('option', { value: ev, selected: ev === s }, `${i + 1}. ${I.STEP_LABELS[ev] || ev}`)));
+    box.append(sel, steps.length > 2 ? h('button', { title: 'remove', onclick: () => { steps.splice(i, 1); renderStepPickers(); analyse(); } }, '×') : '', ' ');
+  });
+}
+document.getElementById('add-step').onclick = () => { steps.push('purchase'); renderStepPickers(); analyse(); };
+document.getElementById('segment').onchange = analyse;
+
+const SEGMENTS = { device: (s) => (s.mobile ? 'mobile' : 'desktop'), campaign: (s) => s.campaign, browser: (s) => s.browser };
+
+function analyse() {
+  if (!sessions) return;
+  const [f] = I.computeFunnel(sessions, steps);
+  const box = document.getElementById('funnel'); box.innerHTML = '';
+  if (!f || !f.steps[0].count) { box.textContent = 'No sessions in this range.'; return; }
+  f.steps.forEach((s, i) => {
+    if (i > 0) {
+      box.append(h('div', { class: 'drop' },
+        h('a', { href: '#', onclick: (e) => { e.preventDefault(); selectedDrop = i - 1; showDrop(f); } },
+          `▼ ${I.num(s.dropped)} dropped (${I.pct(1 - s.fromPrev)})`),
+        s.medianMs !== null ? h('span', { class: 'muted' }, ` · median ${I.dur(s.medianMs)} to next step`) : ''));
+    }
+    box.append(h('div', { class: 'bar-row' },
+      h('div', null, h('strong', null, `${i + 1}. ${I.STEP_LABELS[s.name] || s.name}`)),
+      h('div', { class: 'bar-track' }, h('div', { class: 'bar-fill', style: `width:${Math.max(2, s.fromStart * 100)}%` }), h('span', { class: 'bar-text' }, I.num(s.count))),
+      h('div', { class: 'small' }, h('strong', null, I.pct(s.fromStart)), h('span', { class: 'muted' }, ' of start'))));
+  });
+  const last = f.steps[f.steps.length - 1];
+  box.append(h('p', { class: 'muted' }, `Overall conversion ${I.pct(last.fromStart)} · ${I.num(f.steps[0].count)} sessions entered.`));
+  if (selectedDrop > f.steps.length - 2) selectedDrop = 0;
+  showDrop(f);
+
+  const segKey = document.getElementById('segment').value;
+  const card = document.getElementById('seg-card'); card.hidden = !segKey;
+  if (segKey) {
+    const groups = I.computeFunnel(sessions, steps, SEGMENTS[segKey]);
+    const t = h('table', null, h('tr', null, h('th', null, segKey), steps.map((s, i) => h('th', { class: 'n' }, `${i + 1}. ${I.STEP_LABELS[s] || s}`)), h('th', { class: 'n' }, 'Conversion')));
+    groups.forEach((g) => t.append(h('tr', null, h('td', null, g.segment),
+      g.steps.map((s, i) => h('td', { class: 'n' }, I.num(s.count), i ? h('div', { class: 'small muted' }, I.pct(s.fromPrev, 0) + ' of prev') : '')),
+      h('td', { class: 'n' }, h('strong', null, I.pct(g.steps[g.steps.length - 1].fromStart))))));
+    const segBox = document.getElementById('segments'); segBox.innerHTML = ''; segBox.append(t);
+  }
+}
+
+function showDrop(f) {
+  const step = f.steps[selectedDrop], next = f.steps[selectedDrop + 1];
+  const stuck = step.stuckSessions;
+  document.getElementById('drop-title').textContent = `Dropped after “${I.STEP_LABELS[step.name] || step.name}” (${I.num(stuck.length)})`;
+  document.getElementById('drop-sub').textContent = `Reached step ${selectedDrop + 1} but never “${I.STEP_LABELS[next.name] || next.name}”. Last page they saw:`;
+  const exits = I.exitPages(stuck);
+  const t = h('table', null, h('tr', null, h('th', null, 'Exit page'), h('th', { class: 'n' }, 'Sessions'), h('th', { class: 'n' }, 'Share')));
+  exits.slice(0, 12).forEach(([p, n]) => t.append(h('tr', null, h('td', null, h('code', null, p)), h('td', { class: 'n' }, I.num(n)), h('td', { class: 'n' }, I.pct(n / (stuck.length || 1))))));
+  const eb = document.getElementById('exits'); eb.innerHTML = ''; eb.append(t);
+
+  document.getElementById('stuck-title').textContent = `Dropped sessions after step ${selectedDrop + 1} (recorded first)`;
+  const list = [...stuck].sort((a, b) => recorded.has(b.id) - recorded.has(a.id) || b.events[0].ts - a.events[0].ts).slice(0, 50);
+  const st = h('table', null, h('tr', null, h('th', null, 'Started'), h('th', null, 'User'), h('th', null, 'Device'), h('th', null, 'Campaign'), h('th', null, 'Pages'), h('th', null, 'Last page'), h('th', null, '')));
+  list.forEach((s) => {
+    const pv = s.events.filter((e) => e.event_name === 'page_view');
+    st.append(h('tr', null, h('td', null, I.when(s.events[0].ts)), h('td', null, h('code', null, s.user)),
+      h('td', null, s.mobile ? 'mobile' : 'desktop'), h('td', null, s.campaign), h('td', { class: 'n' }, pv.length),
+      h('td', null, h('code', null, pv.length ? pv[pv.length - 1].event_data_path : '–')),
+      h('td', null, h('a', { href: `replay.html?session=${encodeURIComponent(s.id)}` }, recorded.has(s.id) ? '▶ Watch replay' : 'View journey'))));
+  });
+  const sb = document.getElementById('stuck'); sb.innerHTML = ''; sb.append(st);
+}
+
+async function load(rangeMs) {
+  const end = Date.now(), start = end - rangeMs;
+  I.status('Loading events…');
+  try {
+    const [{ events, truncated }, recs] = await Promise.all([
+      I.fetchEvents(start, end, [...EVENTS, 'faro.session_recording.started']),
+      I.instant(`sum by (session_id) (count_over_time(${I.EV()} | logfmt | event_name="faro.session_recording.started" [${Math.round(rangeMs / 1000)}s]))`),
+    ]);
+    recorded = new Set(recs.map((r) => r.metric.session_id));
+    sessions = I.bySession(events);
+    I.status(truncated ? 'Showing the most recent 200,000 events only. Pick a shorter range for exact numbers.' : '');
+    analyse();
+  } catch (e) { I.status(e.message, 'err'); }
+}
+renderStepPickers();
+const getRange = I.header('funnel.html', '7d', load);
+load(getRange());
+</script>
+</body></html>

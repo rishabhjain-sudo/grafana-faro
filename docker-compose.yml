@@ -60,11 +60,17 @@ services:
     restart: unless-stopped
 
   demo-app:
+    # Demo shop (/) + Insights app (/insights/: replays, funnels, retention,
+    # paths, heatmaps) + read-only Loki query proxy (/loki/api/v1/query*).
     image: nginx:1.27-alpine
     volumes:
       - ./demo-app:/usr/share/nginx/html:ro
+      - ./insights:/usr/share/insights:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - '8080:80'
+    depends_on:
+      - loki
     restart: unless-stopped
 
   loadgen:
@@ -72,12 +78,17 @@ services:
     command: ['python', '-u', '/app/loadgen.py']
     environment:
       COLLECTOR_URL: http://alloy:12347/collect
+      LOKI_PUSH_URL: http://loki:3100/loki/api/v1/push
+      LOKI_QUERY_URL: http://loki:3100
+      BACKFILL_DAYS: ${BACKFILL_DAYS:-13}
+      BACKFILL_SESSIONS_PER_DAY: ${BACKFILL_SESSIONS_PER_DAY:-120}
       SEED_SESSIONS: ${SEED_SESSIONS:-300}
       SESSIONS_PER_MINUTE: ${SESSIONS_PER_MINUTE:-20}
     volumes:
       - ./loadgen/loadgen.py:/app/loadgen.py:ro
     depends_on:
       - alloy
+      - loki
     restart: on-failure
 
 volumes:

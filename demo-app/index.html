@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="styles.css" />
   <!-- Grafana Faro Web SDK 2.14.0 (Apache-2.0), vendored, so no CDN is needed -->
   <script src="vendor/faro-web-sdk-2.14.0.iife.js"></script>
+  <!-- Faro session replay add-on 2.14.0 (Apache-2.0, rrweb-based), vendored -->
+  <script src="vendor/faro-instrumentation-replay-2.14.0.iife.js"></script>
   <script src="config.js"></script>
 </head>
 <body>
@@ -32,7 +34,8 @@
     <button id="wishlist-btn" class="ghost">Use wishlist</button>
     <button id="error-btn" class="danger">Trigger JS error</button>
     <button id="reset-btn" class="ghost">New visitor</button>
-    <a href="http://localhost:3000" target="_blank" rel="noopener">Open dashboard ↗</a>
+    <a href="http://localhost:3000" target="_blank" rel="noopener">Dashboard ↗</a>
+    <a href="/insights/" target="_blank" rel="noopener">Insights (replays, funnels, retention, paths, heatmaps) ↗</a>
   </aside>
 
   <script src="app.js"></script>

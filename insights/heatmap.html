@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insights · Heatmaps</title>
+<link rel="stylesheet" href="insights.css">
+<script src="common.js"></script>
+<style>
+  .layout { display: grid; grid-template-columns: 1fr 360px; gap: 16px; align-items: start; }
+  @media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+  #stage { position: relative; overflow: auto; background: #e9ecef; border-radius: 8px; max-height: 78vh; }
+  #frame-wrap { position: relative; transform-origin: 0 0; }
+  #frame-wrap iframe { border: 0; display: block; background: #fff; }
+  #frame-wrap canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+  .toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+</style>
+</head><body>
+<main>
+  <h1>Heatmaps</h1>
+  <p class="sub">Clicks captured by the demo shop as Faro <code>ui_click</code> events, stored relative to the element that was clicked, and drawn over the live page.</p>
+  <div class="card toolbar">
+    <label>Page <select id="page"></select></label>
+    <label>Device <select id="device"><option value="desktop">Desktop (1280px)</option><option value="mobile">Mobile (390px)</option></select></label>
+    <label>Opacity <input type="range" id="opacity" min="0.2" max="1" step="0.05" value="0.75"></label>
+    <span style="flex:1"></span>
+    <span class="small muted">fewer</span><div class="legend-scale" style="width:120px"></div><span class="small muted">more clicks</span>
+  </div>
+  <div class="layout">
+    <div class="card" style="padding:10px"><div id="stage"><div id="frame-wrap"><iframe id="frame" title="page preview"></iframe><canvas id="heat"></canvas></div></div></div>
+    <div>
+      <div class="grid g2" id="kpis" style="margin-bottom:16px"></div>
+      <div class="card"><h2>Most-clicked elements</h2><div id="elements"></div><p class="muted small" id="note"></p></div>
+    </div>
+  </div>
+</main>
+<script>
+const I = Insights, h = I.h;
+const FIELDS = ['session_id', 'event_data_selector', 'event_data_label', 'event_data_rel_x', 'event_data_rel_y', 'event_data_x', 'event_data_y', 'event_data_vw', 'event_data_path', 'event_data_page'];
+let clicks = [], rangeMs = 0;
+['page', 'device'].forEach((id) => document.getElementById(id).onchange = draw);
+document.getElementById('opacity').oninput = (e) => { document.getElementById('heat').style.opacity = e.target.value; };
+
+async function load(r) {
+  rangeMs = r;
+  const end = Date.now(), start = end - r;
+  I.status('Loading clicks…');
+  try {
+    const { rows, truncated } = await I.logs(`${I.EV()} | logfmt | event_name="ui_click" ${I.fmtLine([...FIELDS, 'event_data_device'])}`, start, end);
+    clicks = I.tsv(rows, [...FIELDS, 'event_data_device']);
+    // Page options: page types ("all product pages") + exact paths, by click volume
+    const byPage = new Map(), byPath = new Map();
+    clicks.forEach((c) => { byPage.set(c.event_data_page, (byPage.get(c.event_data_page) || 0) + 1); byPath.set(c.event_data_path, (byPath.get(c.event_data_path) || 0) + 1); });
+    const sel = document.getElementById('page'), prev = sel.value || 'page:product';
+    sel.innerHTML = '';
+    sel.append(h('optgroup', { label: 'Page type (all URLs of that type)' }, [...byPage.entries()].sort((a, b) => b[1] - a[1]).map(([p, n]) => h('option', { value: 'page:' + p, selected: 'page:' + p === prev }, `${p} (${n})`))),
+      h('optgroup', { label: 'Exact path' }, [...byPath.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([p, n]) => h('option', { value: 'path:' + p, selected: 'path:' + p === prev }, `${p} (${n})`))));
+    I.status(truncated ? 'Showing the most recent 200,000 clicks only.' : clicks.length ? '' : 'No clicks yet. Click around the demo shop, or wait for the traffic generator.');
+    draw();
+  } catch (e) { I.status(e.message, 'err'); }
+}
+
+function draw() {
+  const choice = document.getElementById('page').value || '';
+  const device = document.getElementById('device').value;
+  const [kind, value] = [choice.slice(0, choice.indexOf(':')), choice.slice(choice.indexOf(':') + 1)];
+  const sel = clicks.filter((c) => (kind === 'page' ? c.event_data_page === value : c.event_data_path === value) && (c.event_data_device || 'desktop') === device);
+  // Preview URL: an exact path, or the most-clicked path of that page type
+  let path = kind === 'path' ? value : null;
+  if (!path) { const m = new Map(); sel.forEach((c) => m.set(c.event_data_path, (m.get(c.event_data_path) || 0) + 1)); path = [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '/'; }
+  if (path.startsWith('/success/')) path = '/'; // success pages need an order; show the shop instead
+
+  const width = device === 'mobile' ? 390 : 1280;
+  const frame = document.getElementById('frame'), wrap = document.getElementById('frame-wrap'), stage = document.getElementById('stage');
+  const scale = Math.min(1, (stage.clientWidth - 4) / width);
+  wrap.style.transform = `scale(${scale})`;
+  frame.style.width = width + 'px'; frame.style.height = '900px';
+  frame.onload = () => setTimeout(() => paint(frame, sel, width, scale), 400);
+  frame.src = `/?embed=1#${path}`;
+
+  const summary = I.clickSummary(sel);
+  const sessions = new Set(sel.map((c) => c.session_id)).size;
+  const kp = document.getElementById('kpis'); kp.innerHTML = '';
+  [['Clicks', I.num(sel.length)], ['Sessions', I.num(sessions)]].forEach(([l, v]) => kp.append(h('div', { class: 'card kpi' }, h('div', { class: 'v' }, v), h('div', { class: 'l' }, l))));
+  const t = h('table', null, h('tr', null, h('th', null, 'Element'), h('th', { class: 'n' }, 'Clicks'), h('th', { class: 'n' }, '%')));
+  summary.slice(0, 15).forEach((e) => t.append(h('tr', null, h('td', null, e.label || '(no text)', h('div', null, h('code', null, e.selector.length > 48 ? '…' + e.selector.slice(-46) : e.selector))),
+    h('td', { class: 'n' }, I.num(e.count)), h('td', { class: 'n' }, I.pct(e.count / (sel.length || 1), 0)))));
+  const eb = document.getElementById('elements'); eb.innerHTML = ''; eb.append(t);
+}
+
+function paint(frame, sel, width, scale) {
+  const doc = frame.contentDocument;
+  const height = Math.max(600, doc.documentElement.scrollHeight);
+  frame.style.height = height + 'px';
+  document.getElementById('stage').style.height = Math.min(window.innerHeight * 0.78, height * scale + 4) + 'px';
+  const canvas = document.getElementById('heat');
+  canvas.width = width; canvas.height = height;
+  canvas.style.opacity = document.getElementById('opacity').value;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, width, height);
+
+  // 1) Map each click onto the element it targeted, in the current layout
+  const cache = new Map(); let placed = 0, missing = 0;
+  const pts = [];
+  for (const c of sel) {
+    if (!cache.has(c.event_data_selector)) { let el = null; try { el = doc.querySelector(c.event_data_selector); } catch (_) { /* bad selector */ } cache.set(c.event_data_selector, el); }
+    const el = cache.get(c.event_data_selector);
+    if (el) {
+      const r = el.getBoundingClientRect();
+      pts.push([r.left + (+c.event_data_rel_x) * r.width, r.top + doc.documentElement.scrollTop + (+c.event_data_rel_y) * r.height]); placed++;
+    } else if (+c.event_data_vw > 0 && +c.event_data_x > 0) {
+      pts.push([+c.event_data_x * width / +c.event_data_vw, +c.event_data_y]); placed++; // element gone: fall back to page coordinates
+    } else missing++;
+  }
+  document.getElementById('note').textContent = missing ? `${missing} clicks were on elements not present in this preview (e.g. a different product or state).` : '';
+
+  // 2) Intensity layer (alpha), then 3) colourise
+  const R = width < 500 ? 18 : 26;
+  for (const [x, y] of pts) {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, R);
+    g.addColorStop(0, 'rgba(0,0,0,0.16)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - R, y - R, 2 * R, 2 * R);
+  }
+  if (!pts.length) return;
+  const img = ctx.getImageData(0, 0, width, height), d = img.data;
+  let max = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > max) max = d[i];
+  const pal = palette();
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3]; if (!a) continue;
+    const v = Math.min(255, Math.round((a / max) * 255));
+    d[i] = pal[v * 4]; d[i + 1] = pal[v * 4 + 1]; d[i + 2] = pal[v * 4 + 2]; d[i + 3] = Math.min(230, 60 + v);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function palette() {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 1;
+  const x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 256, 0);
+  [[0, '#0000ff'], [0.25, '#00ffff'], [0.5, '#00ff00'], [0.75, '#ffff00'], [1, '#ff0000']].forEach(([o, col]) => g.addColorStop(o, col));
+  x.fillStyle = g; x.fillRect(0, 0, 256, 1);
+  return x.getImageData(0, 0, 256, 1).data;
+}
+const getRange = I.header('heatmap.html', '24h', load);
+load(getRange());
+</script>
+</body></html>

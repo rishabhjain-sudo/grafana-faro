@@ -3,4 +3,6 @@
 window.FARO_CONFIG = {
   collectorUrl: 'http://localhost:12347/collect',
   app: { name: 'demo-shop', version: '1.0.0', environment: 'poc' },
+  // Session replay: record 100% of sessions in the POC. Lower this in production.
+  replay: { enabled: true, samplingRate: 1 },
 };

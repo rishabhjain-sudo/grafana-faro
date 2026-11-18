@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insights · Retention</title>
+<link rel="stylesheet" href="insights.css">
+<script src="common.js"></script>
+</head><body>
+<main>
+  <h1>Retention</h1>
+  <p class="sub">Users are grouped into cohorts by their first visit (UTC days/weeks). Each cell shows what share of the cohort came back in that period. Faded cells are still in progress.</p>
+  <div class="card" style="margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <label>Cohort size <select id="bucket"><option value="day">Daily</option><option value="week">Weekly</option></select></label>
+    <label>“Returned” means <select id="activity">
+      <option value="page_view">any visit (page view)</option>
+      <option value="add_to_cart">added to cart</option>
+      <option value="purchase">purchased</option>
+    </select></label>
+    <span class="muted small">Cohort = first <em>visit</em>. The activity above defines a return.</span>
+  </div>
+  <div class="grid g4" id="kpis" style="margin-bottom:16px"></div>
+  <div class="card" style="margin-bottom:16px"><h2>Retention curve (average across cohorts)</h2><div id="curve"></div></div>
+  <div class="card"><h2>Cohort table</h2><div id="table" style="overflow:auto"></div></div>
+</main>
+<script>
+const I = Insights, h = I.h, DAY = 86400e3;
+['bucket', 'activity'].forEach((id) => document.getElementById(id).onchange = () => load(getRange()));
+
+function color(p) { // white -> indigo
+  const a = Math.min(1, p * 1.6);
+  return `background: rgba(59, 91, 219, ${a.toFixed(3)}); color: ${a > 0.5 ? '#fff' : 'inherit'}`;
+}
+
+async function load(rangeMs) {
+  const weekly = document.getElementById('bucket').value === 'week';
+  const activity = document.getElementById('activity').value;
+  const bucket = weekly ? 7 * DAY : DAY;
+  const now = Date.now();
+  const end = Math.floor(now / DAY) * DAY + DAY;              // end of today (UTC)
+  const span = Math.max(rangeMs, weekly ? 28 * DAY : 7 * DAY);
+  const start = end - Math.ceil(span / bucket) * bucket;
+  const win = weekly ? '7d' : '1d';
+  I.status('Loading per-user activity…');
+  try {
+    // Cohort membership is always based on first visit (page_view).
+    const visitQ = `sum by (user_id) (count_over_time(${I.EV()} | logfmt | event_name="page_view" [${win}]))`;
+    const visits = await I.range(visitQ, start + bucket, end, bucket / 1000);
+    let ret = I.computeRetention(visits, bucket, now);
+    if (activity !== 'page_view') {
+      // Re-score returns using the chosen activity, keeping cohorts from visits.
+      const actQ = `sum by (user_id) (count_over_time(${I.EV()} | logfmt | event_name="${activity}" [${win}]))`;
+      const acts = await I.range(actQ, start + bucket, end, bucket / 1000);
+      ret = rescore(visits, acts, bucket, now);
+    }
+    render(ret, weekly);
+    I.status(visits.length ? '' : 'No visits in this range.');
+  } catch (e) { I.status(e.message, 'err'); }
+}
+
+function rescore(visits, acts, bucket, now) {
+  const base = I.computeRetention(visits, bucket, now);
+  if (!base.cohorts.length) return base;
+  const t0 = base.cohorts[0].start + bucket; // timestamp of bucket 0
+  const idx = (t) => Math.round((t - t0) / bucket);
+  const first = new Map();
+  for (const s of visits) for (const [t, v] of s.points) if (v > 0) { const i = idx(t); if (!first.has(s.metric.user_id) || i < first.get(s.metric.user_id)) first.set(s.metric.user_id, i); }
+  const did = new Map();
+  for (const s of acts) for (const [t, v] of s.points) if (v > 0) { const u = s.metric.user_id; if (!did.has(u)) did.set(u, new Set()); did.get(u).add(idx(t)); }
+  base.cohorts.forEach((row, c) => {
+    const users = [...first.entries()].filter(([, f]) => f === c).map(([u]) => u);
+    row.cells.forEach((cell) => { cell.n = users.filter((u) => did.has(u) && did.get(u).has(c + cell.k)).length; cell.pct = users.length ? cell.n / users.length : 0; });
+  });
+  return base;
+}
+
+function render(ret, weekly) {
+  const unit = weekly ? 'Week' : 'Day';
+  const rows = ret.cohorts.filter((c) => c.size > 0);
+  const maxK = Math.max(0, ...rows.map((r) => r.cells.length - 1));
+  // Average retention per period (only complete cells, weighted by cohort size)
+  const avg = [];
+  for (let k = 0; k <= maxK; k++) {
+    let n = 0, d = 0;
+    rows.forEach((r) => { const c = r.cells[k]; if (c && !c.partial) { n += c.n; d += r.size; } });
+    avg.push(d ? n / d : null);
+  }
+  const kp = document.getElementById('kpis'); kp.innerHTML = '';
+  const total = rows.reduce((a, r) => a + r.size, 0);
+  [[`New users`, I.num(total)], [`${unit} 1 retention`, avg[1] != null ? I.pct(avg[1]) : '–'],
+   [`${unit} ${Math.min(weekly ? 2 : 7, maxK)} retention`, avg[Math.min(weekly ? 2 : 7, maxK)] != null ? I.pct(avg[Math.min(weekly ? 2 : 7, maxK)]) : '–'],
+   ['Cohorts', rows.length]].forEach(([l, v]) => kp.append(h('div', { class: 'card kpi' }, h('div', { class: 'v' }, v), h('div', { class: 'l' }, l))));
+
+  // Curve (SVG)
+  const W = 1180, H = 220, P = 36, pts = avg.map((v, k) => (v == null ? null : [P + (k / Math.max(1, maxK)) * (W - 2 * P), H - P - v * (H - 2 * P)]));
+  const svg = [`<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="retention curve">`];
+  [0, .25, .5, .75, 1].forEach((g) => { const y = H - P - g * (H - 2 * P); svg.push(`<line x1="${P}" x2="${W - P}" y1="${y}" y2="${y}" stroke="#e4e7ec"/><text x="4" y="${y + 4}" font-size="11" fill="#667085">${g * 100}%</text>`); });
+  const valid = pts.map((p, k) => p && [p, k]).filter(Boolean);
+  if (valid.length) {
+    svg.push(`<polyline fill="none" stroke="#3b5bdb" stroke-width="2.5" points="${valid.map(([p]) => p.join(',')).join(' ')}"/>`);
+    valid.forEach(([p, k]) => svg.push(`<circle cx="${p[0]}" cy="${p[1]}" r="3.5" fill="#3b5bdb"><title>${unit} ${k}: ${I.pct(avg[k])}</title></circle><text x="${p[0]}" y="${H - 12}" font-size="11" fill="#667085" text-anchor="middle">${k}</text>`));
+  }
+  svg.push('</svg>');
+  document.getElementById('curve').innerHTML = svg.join('');
+
+  // Table
+  const t = h('table', { class: 'ret' }, h('tr', null, h('th', null, 'Cohort'), h('th', { class: 'n' }, 'Users'),
+    Array.from({ length: maxK + 1 }, (_, k) => h('th', null, `${unit} ${k}`))));
+  rows.forEach((r) => {
+    const label = new Date(r.start).toLocaleDateString([], { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    t.append(h('tr', null, h('td', { class: 'label' }, label), h('td', { class: 'n' }, I.num(r.size)),
+      Array.from({ length: maxK + 1 }, (_, k) => {
+        const c = r.cells[k];
+        return c ? h('td', { class: c.partial ? 'partial' : '', style: color(c.pct), title: `${c.n} of ${r.size} users` }, I.pct(c.pct, 0)) : h('td', null, '');
+      })));
+  });
+  const box = document.getElementById('table'); box.innerHTML = ''; box.append(t);
+}
+const getRange = I.header('retention.html', '14d', load);
+load(getRange());
+</script>
+</body></html>

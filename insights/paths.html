@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insights · User paths</title>
+<link rel="stylesheet" href="insights.css">
+<script src="common.js"></script>
+</head><body>
+<main>
+  <h1>User paths</h1>
+  <p class="sub">How visitors move through the site, page by page within a session. Repeated reloads of the same page are collapsed.</p>
+  <div class="card" style="margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <label>Group pages by <select id="key"><option value="event_data_page">page type (product, cart…)</option><option value="event_data_path">exact URL path</option></select></label>
+    <label>Only sessions starting on <select id="entry"><option value="">any page</option></select></label>
+    <label>Steps shown <select id="steps"><option>4</option><option selected>5</option><option>6</option></select></label>
+  </div>
+  <div class="card" style="margin-bottom:16px"><h2>Flow</h2><p class="muted small">Columns are the 1st, 2nd, 3rd… page of a session. Band width = sessions. Hover for numbers.</p><div id="flow"></div></div>
+  <div class="grid g2">
+    <div class="card"><h2>Most common journeys</h2><div id="top"></div></div>
+    <div class="card"><h2>Around a page</h2>
+      <label>Page <select id="focus"></select></label>
+      <div class="grid g2" style="margin-top:12px"><div><h2 class="small muted">CAME FROM</h2><div id="prev"></div></div><div><h2 class="small muted">WENT TO NEXT</h2><div id="next"></div></div></div>
+    </div>
+  </div>
+</main>
+<script>
+const I = Insights, h = I.h;
+let sessions = null;
+['key', 'entry', 'steps'].forEach((id) => document.getElementById(id).onchange = render);
+document.getElementById('focus').onchange = renderFocus;
+const PALETTE = ['#4c6ef5', '#12b886', '#fab005', '#fa5252', '#7950f2', '#15aabf', '#fd7e14', '#868e96'];
+
+let paths = [];
+function render() {
+  if (!sessions) return;
+  const key = document.getElementById('key').value;
+  const steps = +document.getElementById('steps').value;
+  const all = I.sessionPaths(sessions, key, 10);
+  // Entry-page filter options
+  const entrySel = document.getElementById('entry'), prevEntry = entrySel.value;
+  const entries = [...new Set(all.map((p) => p.seq[0]))].sort();
+  entrySel.innerHTML = ''; entrySel.append(h('option', { value: '' }, 'any page'), ...entries.map((e) => h('option', { value: e, selected: e === prevEntry }, e)));
+  paths = all.filter((p) => !entrySel.value || p.seq[0] === entrySel.value);
+
+  drawFlow(I.flow(paths, steps, 6), steps);
+
+  const top = I.topSequences(paths, 15);
+  const t = h('table', null, h('tr', null, h('th', null, 'Journey'), h('th', { class: 'n' }, 'Sessions'), h('th', { class: 'n' }, 'Share')));
+  top.forEach(([seq, n]) => t.append(h('tr', null, h('td', null, seq), h('td', { class: 'n' }, I.num(n)), h('td', { class: 'n' }, I.pct(n / paths.length)))));
+  const tb = document.getElementById('top'); tb.innerHTML = ''; tb.append(t);
+
+  const focus = document.getElementById('focus'), prevFocus = focus.value;
+  const pages = [...new Set(paths.flatMap((p) => p.seq).filter((p) => p !== '(exit)' && p !== '…'))].sort();
+  focus.innerHTML = ''; focus.append(...pages.map((p) => h('option', { value: p, selected: p === (prevFocus || (key === 'event_data_page' ? 'product' : '/cart')) }, p)));
+  renderFocus();
+}
+
+function renderFocus() {
+  const page = document.getElementById('focus').value;
+  const tr = I.transitions(paths, page);
+  const tbl = (rows) => {
+    const t = h('table', null);
+    rows.slice(0, 8).forEach(([p, n]) => t.append(h('tr', null, h('td', null, p), h('td', { class: 'n' }, I.pct(n / (tr.total || 1), 0)), h('td', { class: 'n muted' }, I.num(n)))));
+    return t;
+  };
+  ['prev', 'next'].forEach((id) => { const b = document.getElementById(id); b.innerHTML = ''; b.append(tbl(tr[id])); });
+}
+
+function drawFlow(fl, steps) {
+  const W = 1220, H = 380, colW = 150, gap = (W - colW) / Math.max(1, steps - 1), pad = 8;
+  const totals = fl.columns.map((c) => c.reduce((a, [, n]) => a + n, 0));
+  // Largest scale (px per session) at which every column, including the gaps, fits.
+  const scale = Math.min(...totals.map((t, i) => (t ? (H - 40 - pad * (fl.columns[i].length - 1)) / t : Infinity)));
+  const colorOf = new Map(); let ci = 0;
+  const col = (name) => { if (name === '(exit)') return '#ced4da'; if (!colorOf.has(name)) colorOf.set(name, PALETTE[ci++ % PALETTE.length]); return colorOf.get(name); };
+  const pos = fl.columns.map((c, i) => {
+    let y = 20; const m = new Map();
+    c.forEach(([name, n]) => { const hgt = Math.max(2, n * scale); m.set(name, { x: i * gap, y, h: hgt, n, out: y, in: y }); y += hgt + pad; });
+    return m;
+  });
+  const svg = [`<svg viewBox="0 0 ${W} ${H + 10}" width="100%" role="img" aria-label="user flow">`];
+  fl.links.sort((a, b) => b.value - a.value).forEach((l) => {
+    const a = pos[l.step].get(l.from), b = pos[l.step + 1].get(l.to);
+    if (!a || !b) return;
+    const w = Math.max(1, l.value * scale), x1 = a.x + 14, x2 = b.x, y1 = a.out + w / 2, y2 = b.in + w / 2;
+    a.out += w; b.in += w;
+    svg.push(`<path d="M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}" fill="none" stroke="${col(l.from)}" stroke-opacity=".28" stroke-width="${w}"><title>${l.from} → ${l.to}: ${l.value} sessions</title></path>`);
+  });
+  pos.forEach((m, i) => m.forEach((p, name) => {
+    svg.push(`<rect x="${p.x}" y="${p.y}" width="14" height="${p.h}" rx="3" fill="${col(name)}"><title>Step ${i + 1}: ${name} (${p.n})</title></rect>`);
+    if (p.h > 11) svg.push(`<text x="${p.x + 20}" y="${p.y + Math.min(p.h / 2 + 4, 14)}" font-size="12" fill="#1c2128">${name.replace(/&/g, '&amp;').replace(/</g, '&lt;')} <tspan fill="#667085">${p.n}</tspan></text>`);
+  }));
+  for (let i = 0; i < steps; i++) svg.push(`<text x="${i * gap}" y="${H + 8}" font-size="11" fill="#667085">Step ${i + 1}</text>`);
+  svg.push('</svg>');
+  document.getElementById('flow').innerHTML = svg.join('');
+}
+
+async function load(rangeMs) {
+  const end = Date.now(), start = end - rangeMs;
+  I.status('Loading page views…');
+  try {
+    const { events, truncated } = await I.fetchEvents(start, end, ['page_view']);
+    sessions = I.bySession(events);
+    I.status(truncated ? 'Showing the most recent 200,000 page views only.' : '');
+    render();
+  } catch (e) { I.status(e.message, 'err'); }
+}
+const getRange = I.header('paths.html', '7d', load);
+load(getRange());
+</script>
+</body></html>

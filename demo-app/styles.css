@@ -29,3 +29,6 @@ label input { display: block; margin: 6px 0 16px; padding: 8px; border: 1px soli
 .debug { position: fixed; left: 0; right: 0; bottom: 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 24px; background: #fff; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
 .debug strong { color: var(--fg); }
 @media (max-width: 640px) { .detail { grid-template-columns: 1fr; } .topbar { flex-wrap: wrap; } }
+
+/* Heatmap viewer embeds the page without the POC toolbar */
+body.embed .debug { display: none; }

@@ -486,7 +486,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (event_name) (count_over_time({source=\"faro\", app_name=\"$app\", app_env=\"$env\", kind=\"event\"} | logfmt [$__auto]))",
+          "expr": "sum by (event_name) (count_over_time({source=\"faro\", app_name=\"$app\", app_env=\"$env\", kind=\"event\"} | logfmt | event_name!~\"faro.session_recording.event|ui_click\" [$__auto]))",
           "legendFormat": "{{event_name}}",
           "queryType": "range",
           "editorMode": "code"
@@ -775,20 +775,206 @@
       }
     },
     {
-      "type": "row",
-      "title": "Product & audience",
       "id": 14,
-      "collapsed": false,
+      "type": "stat",
+      "title": "Abandoned carts (sessions)",
+      "description": "Sessions that added to cart but never purchased. Inspect them in Insights \u2192 Funnels / Session replay.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
       "gridPos": {
         "x": 0,
         "y": 24,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "count(sum by (session_id) (count_over_time({source=\"faro\", app_name=\"$app\", app_env=\"$env\", kind=\"event\"} | logfmt | event_name=\"add_to_cart\" [$__range])) unless on (session_id) sum by (session_id) (count_over_time({source=\"faro\", app_name=\"$app\", app_env=\"$env\", kind=\"event\"} | logfmt | event_name=\"purchase\" [$__range])))",
+          "legendFormat": "",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Recorded sessions (replay)",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 24,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "count(sum by (session_id) (count_over_time({source=\"faro\", app_name=\"$app\", app_env=\"$env\", kind=\"event\"} | logfmt | event_name=\"faro.session_recording.started\" [$__range])))",
+          "legendFormat": "",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 16,
+      "type": "bargauge",
+      "title": "Most-clicked elements (heatmap data)",
+      "description": "",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "topk(8, sum by (event_data_label) (count_over_time({source=\"faro\", app_name=\"$app\", app_env=\"$env\", kind=\"event\"} | logfmt | event_name=\"ui_click\" [$__range])))",
+          "legendFormat": "{{event_data_label}}",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "namePlacement": "top",
+        "sizing": "auto"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Product & audience",
+      "id": 17,
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 29,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 15,
+      "id": 18,
       "type": "bargauge",
       "title": "Top pages",
       "description": "",
@@ -798,7 +984,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 25,
+        "y": 30,
         "w": 8,
         "h": 9
       },
@@ -850,7 +1036,7 @@
       }
     },
     {
-      "id": 16,
+      "id": 19,
       "type": "bargauge",
       "title": "Most added-to-cart products",
       "description": "",
@@ -860,7 +1046,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 25,
+        "y": 30,
         "w": 8,
         "h": 9
       },
@@ -912,7 +1098,7 @@
       }
     },
     {
-      "id": 17,
+      "id": 20,
       "type": "piechart",
       "title": "Sessions by campaign",
       "description": "",
@@ -922,7 +1108,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 25,
+        "y": 30,
         "w": 8,
         "h": 9
       },
@@ -976,7 +1162,7 @@
       }
     },
     {
-      "id": 18,
+      "id": 21,
       "type": "piechart",
       "title": "Browsers (page views)",
       "description": "",
@@ -986,7 +1172,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 34,
+        "y": 39,
         "w": 8,
         "h": 8
       },
@@ -1040,7 +1226,7 @@
       }
     },
     {
-      "id": 19,
+      "id": 22,
       "type": "bargauge",
       "title": "Signups by plan",
       "description": "",
@@ -1050,7 +1236,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 34,
+        "y": 39,
         "w": 8,
         "h": 8
       },
@@ -1102,7 +1288,7 @@
       }
     },
     {
-      "id": 20,
+      "id": 23,
       "type": "bargauge",
       "title": "Feature adoption",
       "description": "",
@@ -1112,7 +1298,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 34,
+        "y": 39,
         "w": 8,
         "h": 8
       },
@@ -1166,18 +1352,18 @@
     {
       "type": "row",
       "title": "Performance (Core Web Vitals, p75)",
-      "id": 21,
+      "id": 24,
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 42,
+        "y": 47,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 22,
+      "id": 25,
       "type": "stat",
       "title": "LCP p75",
       "description": "",
@@ -1187,7 +1373,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 43,
+        "y": 48,
         "w": 6,
         "h": 4
       },
@@ -1242,7 +1428,7 @@
       }
     },
     {
-      "id": 23,
+      "id": 26,
       "type": "stat",
       "title": "INP p75",
       "description": "",
@@ -1252,7 +1438,7 @@
       },
       "gridPos": {
         "x": 6,
-        "y": 43,
+        "y": 48,
         "w": 6,
         "h": 4
       },
@@ -1307,7 +1493,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 27,
       "type": "stat",
       "title": "CLS p75",
       "description": "",
@@ -1317,7 +1503,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 43,
+        "y": 48,
         "w": 6,
         "h": 4
       },
@@ -1373,7 +1559,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 28,
       "type": "stat",
       "title": "TTFB p75",
       "description": "",
@@ -1383,7 +1569,7 @@
       },
       "gridPos": {
         "x": 18,
-        "y": 43,
+        "y": 48,
         "w": 6,
         "h": 4
       },
@@ -1438,7 +1624,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 29,
       "type": "timeseries",
       "title": "LCP p75 \u00b7 mobile vs desktop",
       "description": "",
@@ -1448,7 +1634,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 47,
+        "y": 52,
         "w": 24,
         "h": 8
       },
@@ -1505,18 +1691,18 @@
     {
       "type": "row",
       "title": "Errors",
-      "id": 27,
+      "id": 30,
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 55,
+        "y": 60,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 28,
+      "id": 31,
       "type": "stat",
       "title": "JS errors",
       "description": "",
@@ -1526,7 +1712,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 56,
+        "y": 61,
         "w": 4,
         "h": 8
       },
@@ -1580,7 +1766,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 32,
       "type": "bargauge",
       "title": "Top errors",
       "description": "",
@@ -1590,7 +1776,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 56,
+        "y": 61,
         "w": 12,
         "h": 8
       },
@@ -1642,7 +1828,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 33,
       "type": "bargauge",
       "title": "Frustration signals (Faro)",
       "description": "Rage clicks and dead clicks detected automatically by the Faro Web SDK.",
@@ -1652,7 +1838,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 56,
+        "y": 61,
         "w": 8,
         "h": 8
       },
@@ -1706,18 +1892,18 @@
     {
       "type": "row",
       "title": "Raw events",
-      "id": 31,
+      "id": 34,
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 64,
+        "y": 69,
         "w": 24,
         "h": 1
       },
       "panels": []
     },
     {
-      "id": 32,
+      "id": 35,
       "type": "logs",
       "title": "Live event stream",
       "description": "",
@@ -1727,7 +1913,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 65,
+        "y": 70,
         "w": 24,
         "h": 10
       },
@@ -1738,7 +1924,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{source=\"faro\", app_name=\"$app\", app_env=\"$env\", kind=\"event\"}",
+          "expr": "{source=\"faro\", app_name=\"$app\", app_env=\"$env\", kind=\"event\"} != \"faro.session_recording.event\"",
           "legendFormat": "",
           "queryType": "range",
           "editorMode": "code"
@@ -1768,5 +1954,41 @@
       }
     }
   ],
-  "links": []
+  "links": [
+    {
+      "title": "Session replay",
+      "type": "link",
+      "url": "http://localhost:8080/insights/replay.html",
+      "targetBlank": true,
+      "icon": "external link"
+    },
+    {
+      "title": "Funnels & drop-off",
+      "type": "link",
+      "url": "http://localhost:8080/insights/funnel.html",
+      "targetBlank": true,
+      "icon": "external link"
+    },
+    {
+      "title": "Retention",
+      "type": "link",
+      "url": "http://localhost:8080/insights/retention.html",
+      "targetBlank": true,
+      "icon": "external link"
+    },
+    {
+      "title": "User paths",
+      "type": "link",
+      "url": "http://localhost:8080/insights/paths.html",
+      "targetBlank": true,
+      "icon": "external link"
+    },
+    {
+      "title": "Heatmaps",
+      "type": "link",
+      "url": "http://localhost:8080/insights/heatmap.html",
+      "targetBlank": true,
+      "icon": "external link"
+    }
+  ]
 }

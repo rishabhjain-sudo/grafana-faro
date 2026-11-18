@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insights · Overview</title>
+<link rel="stylesheet" href="insights.css">
+<script src="common.js"></script>
+</head><body>
+<main>
+  <h1>Product insights</h1>
+  <p class="sub">Open-source product analytics on Grafana Faro events stored in Loki. Pick a view:</p>
+  <div class="grid g4" id="kpis"></div>
+  <div class="grid g3" style="margin-top:16px">
+    <a class="card" href="replay.html"><h2>▶ Session replay</h2><p class="muted">Watch real visits recorded with Faro's rrweb-based replay add-on. Filter abandoned carts, purchases and errors.</p></a>
+    <a class="card" href="funnel.html"><h2>⏬ Funnels &amp; drop-off</h2><p class="muted">Strict, ordered funnels per session, with step conversion, time between steps, drop-off counts, exit pages and links to replays.</p></a>
+    <a class="card" href="retention.html"><h2>↻ Retention</h2><p class="muted">Daily or weekly cohorts by first visit: what share comes back on day N.</p></a>
+    <a class="card" href="paths.html"><h2>⇢ User paths</h2><p class="muted">Most common journeys, a flow diagram, and what happens before and after any page.</p></a>
+    <a class="card" href="heatmap.html"><h2>▦ Heatmaps</h2><p class="muted">Click heatmaps drawn on the live page, per page and device, plus the most-clicked elements.</p></a>
+    <a class="card" href="http://localhost:3000" target="_blank"><h2>▤ Grafana dashboard ↗</h2><p class="muted">KPIs, web vitals, errors and ad-hoc LogQL in Explore.</p></a>
+  </div>
+</main>
+<script>
+const I = Insights;
+async function load(rangeMs) {
+  const end = Date.now(), start = end - rangeMs, R = Math.round(rangeMs / 1000) + 's';
+  const box = document.getElementById('kpis'); box.innerHTML = '';
+  I.status('Loading…');
+  try {
+    const q = (e) => I.instant(e).then((r) => (r[0] ? r[0].value : 0));
+    const [users, sessions, buyers, recs] = await Promise.all([
+      q(`count(sum by (user_id) (count_over_time(${I.EV()} | logfmt [${R}])))`),
+      q(`count(sum by (session_id) (count_over_time(${I.EV()} | logfmt [${R}])))`),
+      q(`count(sum by (session_id) (count_over_time(${I.EV()} | logfmt | event_name="purchase" [${R}])))`),
+      q(`count(sum by (session_id) (count_over_time(${I.EV()} | logfmt | event_name="faro.session_recording.started" [${R}])))`),
+    ]);
+    [['Users', I.num(users)], ['Sessions', I.num(sessions)], ['Conversion', sessions ? I.pct(buyers / sessions) : '–'], ['Recorded sessions', I.num(recs)]]
+      .forEach(([l, v]) => box.append(I.h('div', { class: 'card kpi' }, I.h('div', { class: 'v' }, v), I.h('div', { class: 'l' }, l))));
+    I.status('');
+  } catch (e) { I.status(e.message, 'err'); }
+}
+const getRange = I.header('index.html', '24h', load);
+load(getRange());
+</script>
+</body></html>
