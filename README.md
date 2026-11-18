@@ -74,7 +74,7 @@ For npm-based apps, install `@grafana/faro-web-sdk` and import `initializeFaro` 
 
 The dashboard was checked against a real **Loki 3.7.10 + Alloy 1.21.3** pipeline, using the same versions and the same config files as `docker-compose.yml`:
 
-- **Dashboard queries:** all 30 return data. Users, sessions, page views, conversion, funnel and p75 web vitals match numbers calculated separately from the raw events.
+- **Dashboard queries:** all 29 return data. Users, sessions, page views, conversion, funnel and p75 web vitals match numbers calculated separately from the raw events.
 - **Demo shop:** its real `app.js` ran in a headless DOM with the vendored Faro SDK 2.14.0. One visitor's full journey (product → cart → checkout → purchase → signup → feature use) reached Loki with a consistent user and session.
 - **Query cookbook:** every query in `docs/QUERIES.md` runs. `docker-compose.yml` validates, and `poc.sh` passes shellcheck.
 
