@@ -1,0 +1,58 @@
+// Grafana Alloy: receives Grafana Faro payloads from the browser and ships
+// them to Loki as logfmt log lines.
+//
+//   browser (Faro Web SDK) --POST /collect--> faro.receiver --> loki.process --> Loki
+
+faro.receiver "frontend" {
+  server {
+    listen_address           = "0.0.0.0"
+    listen_port              = 12347
+    cors_allowed_origins     = ["*"]
+    max_allowed_payload_size = "5MiB"
+
+    rate_limiting {
+      rate       = 500
+      burst_size = 1000
+    }
+  }
+
+  output {
+    logs = [loki.process.frontend.receiver]
+  }
+}
+
+loki.process "frontend" {
+  // Faro lines are logfmt. Promote a few low-cardinality fields to labels
+  // so dashboards can select streams cheaply. High-cardinality fields
+  // (session_id, user_id, page_url) stay in the line and are parsed at
+  // query time with `| logfmt`.
+  stage.logfmt {
+    mapping = {
+      kind     = "",
+      app_name = "app_name",
+      app_env  = "app_environment",
+    }
+  }
+
+  stage.labels {
+    values = {
+      kind     = "",
+      app_name = "",
+      app_env  = "",
+    }
+  }
+
+  stage.static_labels {
+    values = {
+      source = "faro",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = sys.env("LOKI_PUSH_URL")
+  }
+}

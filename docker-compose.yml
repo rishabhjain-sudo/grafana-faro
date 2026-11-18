@@ -1,0 +1,85 @@
+# -----------------------------------------------------------------------------
+# Frontend product analytics POC: Grafana Faro + Alloy + Loki + Grafana
+#
+#   browser (demo shop, Faro Web SDK) ──POST /collect──► Alloy (faro.receiver)
+#   loadgen (synthetic visitors)      ──────────────────►      │
+#                                                              ▼
+#                                     Grafana ◄──LogQL── Loki (events, vitals, errors)
+#
+# All components are open source (Grafana/Loki: AGPLv3, Alloy/Faro: Apache-2.0).
+# -----------------------------------------------------------------------------
+name: faro-analytics
+
+services:
+  loki:
+    image: grafana/loki:3.7.10
+    command: ['-config.file=/etc/loki/loki.yaml']
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    ports:
+      - '127.0.0.1:3100:3100' # for tools/test_queries.py and ad-hoc LogQL
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.21.3
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    environment:
+      LOKI_PUSH_URL: http://loki:3100/loki/api/v1/push
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    ports:
+      - '12347:12347' # Faro collector: browsers POST to http://localhost:12347/collect
+      - '127.0.0.1:12345:12345' # Alloy UI (pipeline graph, debug)
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.6
+    environment:
+      # POC convenience: no login. Do NOT use these settings in production.
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/product-analytics.json
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_NEWS_NEWS_FEED_ENABLED: 'false'
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - '3000:3000'
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  demo-app:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./demo-app:/usr/share/nginx/html:ro
+    ports:
+      - '8080:80'
+    restart: unless-stopped
+
+  loadgen:
+    image: python:3.13-alpine
+    command: ['python', '-u', '/app/loadgen.py']
+    environment:
+      COLLECTOR_URL: http://alloy:12347/collect
+      SEED_SESSIONS: ${SEED_SESSIONS:-300}
+      SESSIONS_PER_MINUTE: ${SESSIONS_PER_MINUTE:-20}
+    volumes:
+      - ./loadgen/loadgen.py:/app/loadgen.py:ro
+    depends_on:
+      - alloy
+    restart: on-failure
+
+volumes:
+  loki-data:
+  grafana-data:
